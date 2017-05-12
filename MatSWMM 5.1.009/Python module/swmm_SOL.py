@@ -30,10 +30,12 @@ from os import remove # Required to clear info file.
 import math, re # Used to create .rpt and .out paths
 # ------------------------ CONSTANTS ---------------------------
 # path to SO
-SO_loc  = os.path.join('/','Users','bb','Software_Thesis', 'SWMM', 'swmm_so','source5_1_011', 'swmm5')
+SO_loc  = os.path.join(os.expanduser('~'), 'Software_Thesis', 'SWMM', 'swmm_so',
+                                             'source5_1_011', 'swmm5')
 
 ### identical to engine
-#SO_loc  = os.path.join('/','Users','bb','Software_Thesis', 'SWMM', 'swmm_so', 'source_orig', 'swmm5')
+#SO_loc  = os.path.join(os.expanduser('~')'Software_Thesis', 'SWMM', 'swmm_so',
+                                                    #   'source_orig', 'swmm5')
 
 # Types of objects
 JUNCTION = 0
