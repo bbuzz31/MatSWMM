@@ -4,6 +4,7 @@
 //   Project: EPA SWMM5
 //   Version: 5.1
 //   Date:    03/24/14  (Build 5.1.001)
+//            08/01/16  (Build 5.1.011)
 //   Author:  L. Rossman
 //
 //   Prototypes for SWMM5 functions exported to swmm5.dll.
@@ -22,7 +23,7 @@
   #define WINDOWS
 #endif
 
-// --- define DLLEXPORT
+// --- define
 
 #ifdef WINDOWS
   #define DLLEXPORT __declspec(dllexport) __stdcall
@@ -33,31 +34,42 @@
 // --- use "C" linkage for C++ programs
 
 #ifdef __cplusplus
-extern "C" { 
-#endif 
+extern "C" {
+#endif
 
-int  DLLEXPORT   swmm_run(char* f1, char* f2, char* f3);
-int  DLLEXPORT   swmm_open(char* f1, char* f2, char* f3);
-int  DLLEXPORT   swmm_start(int saveFlag);
-int  DLLEXPORT   swmm_step(double* elapsedTime);
-int  DLLEXPORT   swmm_end(void);
-int  DLLEXPORT   swmm_report(void);
-int  DLLEXPORT   swmm_getMassBalErr(float* runoffErr, float* flowErr,
+int    swmm_run(char* f1, char* f2, char* f3);
+int    swmm_open(char* f1, char* f2, char* f3);
+int    swmm_start(int saveFlag);
+int    swmm_step(double* elapsedTime);
+int    swmm_end(void);
+int    swmm_report(void);
+int    swmm_getMassBalErr(float* runoffErr, float* flowErr,
                  float* qualErr);
-int  DLLEXPORT   swmm_close(void);
-int  DLLEXPORT   swmm_getVersion(void);
-
+int    swmm_close(void);
+int    swmm_getVersion(void);
+int    swmm_getError(char* errMsg, int msgLen);                      //(5.1.011)
+int    swmm_getWarnings(void);                                       //(5.1.011)
 // Cosimulation getters
-double DLLEXPORT swmm_get( char* id, int attribute, int units );
-double DLLEXPORT swmm_get_from_input(char* filename, char *id, int attribute);
-int DLLEXPORT swmm_save_all(char* input_file, int object_type, int attribute);
-// Cosimulation setters
-int DLLEXPORT swmm_modify_setting(char* id, double new_setting, double tstep);
-int DLLEXPORT swmm_modify_input(char* input_file, char *id, int attribute, double value);
-int DLLEXPORT swmm_save_results();
+double  swmm_get(char* id, int attribute, int units);
+double  swmm_get_from_input(char* filename, char *id,
+                                     int attribute);
+int  swmm_save_all(char* input_file, int object_type,
+                            int attribute);
 
-#ifdef __cplusplus 
-}   // matches the linkage specification from above */ 
+// Cosimulation setters
+int  swmm_setGW(char* id, int attribute, int units,
+                            double new_val);
+
+int  swmm_addRUN(char* id, int attributes, int units, double new_val);
+
+int  swmm_modify_setting(char* id, double new_setting,
+                                  double tstep);
+int  swmm_modify_input(char* input_file, char *id,
+                                int attribute, double value);
+int  swmm_save_results();
+
+#ifdef __cplusplus
+}   // matches the linkage specification from above */
 #endif
 
 #endif

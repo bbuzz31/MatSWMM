@@ -16,7 +16,7 @@
 #include "headers.h" // It is used because some of the functions developed for SWMM are re-used.
 #include "cosimulation.h"
 
-#include <malloc.h>
+#include <stdlib.h>
 #include <string.h>
 #include <math.h>
 #include <time.h>
@@ -28,6 +28,8 @@
 extern REAL4* SubcatchResults;         // Results vectors defined in OUTPUT.C
 extern REAL4* NodeResults;             //  "
 extern REAL4* LinkResults;             //  "
+
+static const double C_XTOL = 0.001;
 
 /****************************************************************************
  *
@@ -114,7 +116,7 @@ int c_saveResults()
 		    output_readNodeResults(period, j);
 		    fprintf(temporal, "%9.3f,%9.3f,%9.3f,%9.3f,%9.3f\n",
 		        NodeResults[NODE_INFLOW],
-		        NodeResults[NODE_OVERFLOW], 
+		        NodeResults[NODE_OVERFLOW],
 				NodeResults[NODE_DEPTH],
 				NodeResults[NODE_VOLUME]);
 		}
@@ -122,7 +124,6 @@ int c_saveResults()
 	}
 	return Nperiods;
 }
-
 /*
  * Inputs: id        (str) -> ID of the object whose attribute is going to be retrieved.
    	       attribute (int) -> Attribute that needs to be known.
@@ -137,6 +138,10 @@ double c_get( char* id, int attribute, int units )
 	int j, i, type;
 	int object_types[] = {NODE, LINK, SUBCATCH};
 	int len = sizeof(object_types)/sizeof(object_types[0]);
+ // Following may not be necessary
+ TRunoffTotals* totals;
+ TSubarea* subarea;
+
 
 	// Defines the type of the object and looks for the object
 	for(i=0; i<len; i++)
@@ -152,6 +157,9 @@ double c_get( char* id, int attribute, int units )
 	// Do if the object was found
 	if( j >= 0 )
 	{
+  // this may ne necessary for getting correct values from subareas
+  subarea = &Subcatch[j].subArea[2];
+
 		switch(type)
 		{
 			case NODE:
@@ -199,6 +207,43 @@ double c_get( char* id, int attribute, int units )
 					case C_RUNOFF:
 						if (units == SI) return CFTOCM(Subcatch[j].newRunoff);
 						else return Subcatch[j].newRunoff;
+     case C_INFIL:
+      if (units == SI) return FTPERSTOMMPERHR(Subcatch[j].infilLoss);
+      //else return Subcatch[j].infilLoss * 43200.0;
+      else return Subcatch[j].infilLoss;
+
+
+      // For Coupling
+     case C_AVAILINF:
+      if (units == SI) return FTPERSTOMMPERHR(Subcatch[j].infilAvail);
+      //else return Subcatch[j].infilAvail* 43200.0;
+      else return (Subcatch[j].infilAvail);
+      //
+     case C_EVAP:
+      if (units == SI) return FTPERSTOMMPERHR(Subcatch[j].evapLoss);
+      else return (Subcatch[j].evapLoss) ;
+     case C_GW_ET:
+      if (units == SI) return FTPERSTOMMPERHR(Subcatch[j].groundwater->evapLoss);
+      else return (Subcatch[j].groundwater->evapLoss);
+     case C_HEAD:
+      if (units == SI) return FTTOM(Subcatch[j].groundwater->stats.finalWaterTable);
+      //if (units == SI) return FTTOM(Subcatch[j].groundwater->waterTableElev);
+      else return Subcatch[j].groundwater->stats.finalWaterTable;
+     case C_THETA:
+      return Subcatch[j].groundwater->theta;
+      // to see additional gw leakage from modflow:
+      //return (Subcatch[j].groundwater->gw_leak)*.3048;
+
+     // following I wrote are for debugging, I think
+     case C_POND:
+      if (units == SI) return subarea->depth;
+      else return Subcatch[j].subArea->depth;
+     case C_MAXINF:
+      if (units == SI) return (Subcatch[j].groundwater->maxInfilVol/900*UCF(RAINFALL));
+      else return Subcatch[j].groundwater->maxInfilVol;
+     case C_RUNON:
+      if (units == SI) return CFTOCM(Subcatch[j].oldRunoff);
+      else return Subcatch[j].oldRunoff;
 					default: return C_ERROR_ATR; /* Attribute not compatible */
 				}
 			default: return C_ERROR_TYPE; /* Type of object not compatible */
@@ -259,6 +304,158 @@ double c_get_from_input(char* input_file, char *id, int attribute)
 	}
 }
 
+/* BB
+* Inputs: id        (str) -> ID of the object whose attribute is going to be retrieved.
+         attribute (int) -> Attribute that needs to be known.
+         units     (int) -> Unit system that must be used to calculate the attribute (SI/US).
+         new_val   (double) -> Value to set
+         * Output: Value of the attribute (double) - If the attribute or the type are incoherent return negative value.
+         Returns error code if there is an error.
+
+* Purpose: Sets groundwater head or theta for next time step.
+* Notes: [IT MUST BE USED WHILE A SIMULATION IS RUNNING]
+*/
+int c_setGW(char* id, int attribute, int units, double new_val)
+
+ {
+ int j, i, type;
+ int object_types = SUBCATCH;
+ TAquifer c_a;
+ TGroundwater *c_gw;
+ TSubcatch *Sub;
+ //subarea = &Subcatch[j].subArea[2];
+
+ double new_maxinfil, c_fracperv, add_run;
+
+
+ // Defines the type of the object and looks for the object
+ j = project_findObject(object_types, id); // Index for the object being sought in the hash table.
+
+
+ if (j >= 0) {
+
+  // pointers to structures & swmm function
+  c_gw = Subcatch[j].groundwater;
+  c_a = Aquifer[c_gw->aquifer];
+
+
+  c_fracperv = subcatch_getFracPerv(j);
+
+  switch (attribute) {
+
+    case C_HEAD:
+     if (units == SI) {
+      new_val = new_val / 0.3048;
+      }
+     c_gw->lowerDepth = new_val;
+
+     // prevent gw table from rising above the surface
+
+     new_maxinfil = ((c_gw->surfElev - c_gw->bottomElev) - c_gw->lowerDepth) *
+      (c_a.porosity - c_gw->theta) / c_fracperv;
+
+     c_gw->maxInfilVol = new_maxinfil;
+     // to see if new heads are working; leave because it should be updated
+     c_gw->stats.finalWaterTable = c_gw->lowerDepth;
+     return 0;
+
+    case C_THETA:
+     if (new_val > c_a.porosity) {
+      new_val = c_a.porosity - C_XTOL;
+      c_gw->theta = new_val;
+      c_gw->stats.finalUpperMoist = new_val;
+      return C_WARNING_THETA;
+      }
+
+     c_gw->theta = new_val;
+
+     c_gw->stats.finalUpperMoist = new_val;
+     return 0;
+
+    //*
+    case C_GWRUN:
+
+     if (units == SI) {
+      new_val = CMTOCF(new_val);
+      Subcatch[j].newRunoff += new_val;
+      }
+     else {
+       new_val = new_val;
+       Subcatch[j].newRunoff += new_val;
+      }
+     return 0;
+     //*/
+
+
+   }
+
+  }
+ else {
+  return C_ERROR_NFOUND; /*Can't find object type; subcatchments only*/
+  }
+
+
+ }
+
+int c_addRUN(char* id, int attribute, int units, double new_val)
+
+ {
+ int j, type;
+ int object_types = SUBCATCH;
+ TAquifer c_a;
+ TGroundwater* c_gw;
+ TSubarea * subarea;
+ double new_maxinfil, c_fracperv;
+
+
+ // Defines the type of the object and looks for the object
+ j = project_findObject(object_types, id); // Index for the object being sought in the hash table.
+
+
+ if (j >= 0) {
+
+  // pointers to structures & swmm function
+  c_gw = Subcatch[j].groundwater;
+  c_a = Aquifer[c_gw->aquifer];
+  c_fracperv = subcatch_getFracPerv(j);
+
+  switch (attribute) {
+
+    case C_ADDPOND:
+     /*if (units == SI) {
+      new_val = new_val / 0.3048;
+      }*/
+     subarea = &Subcatch[j].subArea[2];
+
+     subarea->depth=new_val;
+
+     //// prevent gw table from rising above the surface
+
+     //new_maxinfil = ((c_gw->surfElev - c_gw->bottomElev) - c_gw->lowerDepth) *
+     // (c_a.porosity - c_gw->theta) / c_fracperv;
+
+     //c_gw->maxInfilVol = new_maxinfil;
+     //// to see if new heads are working; leave because it should be updated
+     //c_gw->stats.finalWaterTable = c_gw->lowerDepth;
+     return 0;
+
+    case C_SUBINFLOW:
+     subarea = &Subcatch[j].subArea[2];
+
+      subarea->inflow = new_val;
+
+     return 0;
+
+    default: return C_ERROR_ATR; /* Attribute not compatible */
+
+   }
+  }
+ else {
+  return C_ERROR_NFOUND; /*Can't find object type; subcatchments only*/
+  }
+
+
+ }
 /*
  * Inputs:  id 			(str)	 -> ID of the setting
  			new_setting (double) -> New value of the setting, decimal percentage.
@@ -284,8 +481,6 @@ int  c_modify_setting(char* id, double new_setting, double tstep)
 
 	return 0; /* Success */
 }
-
-
 /*
  * Inputs:  input_file 	(str)    -> Path to the input file.
  			id 			(str)    -> ID of the object that is going to be changed.
@@ -355,9 +550,6 @@ int c_modify_input_value(char* input_file, char *id, int attribute, double value
 
    return 0; /* Success! */
 }
-
-
-
 /*
  * Inputs:  input_file 	(str)    -> Path to the input file.
  			object_type (int)    -> Type of the objects that are going to be searched.
@@ -372,73 +564,72 @@ int c_modify_input_value(char* input_file, char *id, int attribute, double value
  */
 int c_look4all(char* input_file, int object_type, int attribute)
 {
-	FILE* file = fopen(input_file, "r"); //Input file
-	FILE* persistent = fopen("info.dat", "w"); // Data file -> info.dat
-	int res, i, k=0;
-	char *token;
-	char line[LEN];
-	char variable_name[25];
-	char variable_value[25];
-	InputInfo positions; // Positioning struct
+ 	FILE* file = fopen(input_file, "r"); //Input file
+ 	FILE* persistent = fopen("info.dat", "w"); // Data file -> info.dat
+ 	int res, i, k=0;
+ 	char *token;
+ 	char line[LEN];
+ 	char variable_name[25];
+ 	char variable_value[25];
+ 	InputInfo positions; // Positioning struct
 
-	if (file == NULL) return C_ERROR_PATH;
+ 	if (file == NULL) return C_ERROR_PATH;
 
-	// Retrieves table positioning variables
-	res = c_get_key_column(&positions, object_type, attribute);
-	if (res != 0 )
-	{
-		fclose(file);
-		fclose(persistent);
-		return res; /* Attribute not found -*- Object_type not found */
-	}
+ 	// Retrieves table positioning variables
+ 	res = c_get_key_column(&positions, object_type, attribute);
+ 	if (res != 0 )
+ 	{
+ 		fclose(file);
+ 		fclose(persistent);
+ 		return res; /* Attribute not found -*- Object_type not found */
+ 	}
 
-	// Finds the section related to the object_type
-	while( strncmp(line, positions.key, sizeof(positions.key)) != 0)
-	{
-		fscanf( file, "%s ", line);
-		if(feof(file))
-		{
-			fclose(file);
-			fclose(persistent);
-			return C_ERROR_NFOUND;
-		}
-	}
+ 	// Finds the section related to the object_type
+ 	while( strncmp(line, positions.key, sizeof(positions.key)) != 0)
+ 	{
+ 		fscanf( file, "%s ", line);
+ 		if(feof(file))
+ 		{
+ 			fclose(file);
+ 			fclose(persistent);
+ 			return C_ERROR_NFOUND;
+ 		}
+ 	}
 
-// Write data file
-	while(fgets(line, LEN, file) != NULL){
+ // Write data file
+ 	while(fgets(line, LEN, file) != NULL){
 
-		if (strncmp(line,";", 1) == 0) continue;
-		if (strncmp(line,"\n",1) == 0) continue;
-		token = strtok(line, " ");
+ 		if (strncmp(line,";", 1) == 0) continue;
+ 		if (strncmp(line,"\n",1) == 0) continue;
+ 		token = strtok(line, " ");
 
-		// Verifies the end of the table
-		if( strncmp(line, "[", 1) == 0 ) break;
-		// Writes the data file
-		while(token != NULL){
-			if(positions.column != 0){
-				fprintf(persistent, "%s ", token);
-				while(k < positions.column){
-					token = strtok(NULL, " ");
-					k ++;
-				}
-				k = 0;
-				fprintf(persistent, "%s\n", token);
-				break;
-			}
-			else{
-				fprintf(persistent, "%s\n", token);
-				break;
-			}
-		}
-	}
+ 		// Verifies the end of the table
+ 		if( strncmp(line, "[", 1) == 0 ) break;
+ 		// Writes the data file
+ 		while(token != NULL){
+ 			if(positions.column != 0){
+ 				fprintf(persistent, "%s ", token);
+ 				while(k < positions.column){
+ 					token = strtok(NULL, " ");
+ 					k ++;
+ 				}
+ 				k = 0;
+ 				fprintf(persistent, "%s\n", token);
+ 				break;
+ 			}
+ 			else{
+ 				fprintf(persistent, "%s\n", token);
+ 				break;
+ 			}
+ 		}
+ 	}
 
-	// Close files Succesfully
-	fclose(file);
-	fclose(persistent);
-	if (feof(file)) return C_ERROR_NFOUND;
-	return 0;
+ 	// Close files Succesfully
+ 	fclose(file);
+ 	fclose(persistent);
+ 	if (feof(file)) return C_ERROR_NFOUND;
+ 	return 0;
 }
-
 /*
  * Inputs:  input_file 	(FILE**) -> Pointer to the input file.
  			object_type (int)    -> Type of the objects that are going to be searched/modified.
@@ -447,7 +638,6 @@ int c_look4all(char* input_file, int object_type, int attribute)
  * Purpose: It defines the type of object and seeks its position in the input file
  * Output:  Returns error code if the object was not found.
  */
-
 int c_look4inputID(FILE** input_file, int* object_type, char* line, char* id)
 {
 	char* keys[] = {"[CONDUITS]", "[JUNCTIONS]", "[STORAGE]", "[SUBCATCHMENTS]", "[ORIFICES]", NULL};
@@ -483,7 +673,6 @@ int c_look4inputID(FILE** input_file, int* object_type, char* line, char* id)
 
 	return 0;
 }
-
 /*
  * Inputs:  new_i 		(InputInfo*) -> Pointer to Struct with positioning information.
  			object_type (int)    	 -> Type of the objects that are going to be searched.
@@ -568,7 +757,6 @@ int c_get_key_column(InputInfo* new_i, int object_type, int attribute)
 
 	return 0;
 }
-
 /* Inputs: list (char **) -> Array of strings. The last element in the list is NULL.
 		   key  (char  *) -> String.
  * Output: -1 if the string was not found otherwise return the position index.

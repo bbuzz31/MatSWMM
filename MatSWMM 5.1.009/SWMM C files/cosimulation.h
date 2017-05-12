@@ -8,6 +8,8 @@
 //   Author:   Gerardo Riano Briceno
 //	 Visit us: http://giap.uniandes.edu.co
 //
+//   Updated by Brett Buzzanga
+//   On: 11.22.2016
 //	 Constants and functions used by cosimulation.c
 //--------------------------------------------------------------------------------------
 
@@ -15,12 +17,16 @@
 //    UNIT CONVERTION - For units in SI
 //=============================================================================
 
+
 #define CFTOCM(m) m*0.0283168466
+#define CMTOCF(m) m*35.3147
 #define FT2TOM2(m) m*0.09290304
 #define FTTOM(m) m*0.3048
 #define FTPERSTOMMPERHR(m) m*304.8*3600
+#define FTPERSTOMMPERDAY(m) m*304.8*3600*24
 #define LEN 1024
 #define MIN_LEN 512
+
 
 
 /************* ERROR CONSTANTS *************/
@@ -31,6 +37,8 @@ enum ErrorConstants{
 	C_ERROR_NFOUND,
 	C_ERROR_INCOHERENT,
 	C_ERROR_IS_NUMERIC,
+ C_ERROR_GROUND_ELEV,
+ C_WARNING_THETA
 };
 
 /*******************************************
@@ -46,9 +54,22 @@ enum Aconstants{
 	C_FROUDE,			// [LINK]
 	C_INFLOW,			// [NODE]
 	C_FLOODING,			// [NODE]
-	C_PRECIPITATION,	// [SUBCATCHMENT]
+	C_PRECIPITATION,	        // [SUBCATCHMENT]
 	C_RUNOFF,			// [SUBCATCHMENT]
-	C_LINK_AREA, 		// [LINK]
+ C_INFIL,
+ C_AVAILINF,
+ C_EVAP,
+ C_GW_ET,
+ C_HEAD,
+ C_THETA,
+ C_MAXINF,
+ C_POND, 
+ C_RUNON,
+ C_GWRUN,
+ C_ADDPOND,
+ C_SUBINFLOW,
+ C_LINK_AREA, 
+
 };
 
  /*******************************************
@@ -99,7 +120,11 @@ double c_get( char* id, int attribute, int units );
 double c_get_from_input(char* input_file, char *id, int attribute);
 int c_look4all(char* input_file, int object_type, int attribute);
 // Setters
-int  c_modify_setting(char* id, double new_setting, double tstep);
+int c_setGW(char* id, int attribute, int units,
+                            double new_val);
+int c_addRUN(char* id, int attributes, int units, double new_val);
+
+int c_modify_setting(char* id, double new_setting, double tstep);
 int c_modify_input_value(char* filename, char *id, int attribute, double value);
 // Aux (parsers)
 int c_look4inputID(FILE** input_file, int* object_type, char* line, char* id);
